@@ -16,7 +16,7 @@ def gerar_dados(x,amplitude, frequencia):
         
 
 
-class JanelaGrafico(QtWidgets.QMainWindow):
+class JanelaOciloscopio(QtWidgets.QMainWindow):
     #Construtor da classe e declaracao de objetos
     contBotao1 = 0 # Contador para o botao 1 
     estiloBotoesZoom = """
@@ -49,9 +49,19 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         padding: 10px;
     }
 """
+    estiloBotaoCor = """
+    QPushButton {
+        background-color:#ff8838 ;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #000000;
+        padding: 10px;
+    }
+"""
     escalax = (-10, 10) # Escala do eixo x do grafico
     escalay = (-1.5, 1.5) # Escala do eixo y do grafico
-
+    corGrafico = '#FF0000' # Cor do grafico
 
     def __init__(self): 
         super().__init__()# Construtor da classe pai 
@@ -91,7 +101,7 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         self.layout_lateral.addWidget(self.Zoomin) # Adicionar o botao 2 ao layout lateral
         self.Zoomin.setStyleSheet(self.estiloBotoesZoom) # Aplicar o estilo ao botao 2
 
-        self.layout_lateral.addSpacing(50) # Adicionar um espaçamento entre os botões 3 e 4
+        self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 3 e 4
 
 
         #Botao 3 - Resetar 
@@ -100,7 +110,7 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         self.layout_lateral.addWidget(self.Resetar) # Adicionar o botao 3 ao layout lateral
         self.Resetar.setStyleSheet(self.estiloBotoeReset) # Aplicar o estilo ao botao 3
         
-        self.layout_lateral.addSpacing(50) # Adicionar um espaçamento entre os botões 3 e 4
+        self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 3 e 4
 
         #Botao 4 - Escala 
         self.EscalaPositiva = QtWidgets.QPushButton("Escala Positiva") # Criacao do botao 4
@@ -112,7 +122,16 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         self.EscalaNegativa.clicked.connect(self.EscalaNegativa_clicado) # Conectar o clique do botao 5 a funcao EscalaNegativa_clicado
         self.layout_lateral.addWidget(self.EscalaNegativa) # Adicionar o botao 5 ao layout lateral
         self.EscalaNegativa.setStyleSheet(self.estiloBotoesEscala) # Aplicar o estilo ao botao 5
-       
+
+        self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 4 e 5
+        #Seletor de cor do grafico 
+        self.botao_cor = QtWidgets.QPushButton("Selecionar Cor do Grafico") # Criacao do botao para selecionar a cor do grafico
+        self.botao_cor.clicked.connect(self.selecionar_cor_clicado) # Conectar o clique do botao a funcao selecionar_cor_clicado
+        self.botao_cor.setStyleSheet(self.estiloBotaoCor) # Aplicar o estilo ao botao de cor
+        self.caixa_texto_cor = QtWidgets.QColorDialog() # Criacao do seletor de cor
+        self.layout_lateral.addWidget(self.botao_cor) # Adicionar o botao ao layout lateral
+
+
 
         #Layout dos botoes 
 
@@ -139,7 +158,7 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 com 1000 pontos 
         y = gerar_dados(x,1,0.3) # Gerar os dados do seno (Mutavel, ira variar de acordo com o que se deseja plotar)
 
-        self.grafico.plot(x, y, pen='r') # Plotar os dados no grafico com a cor vermelha
+        self.grafico.plot(x, y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
 
 
 
@@ -162,6 +181,9 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         self.escalax = (-10, 10) # Resetar a escala do eixo x
         self.escalay = (-1.5, 1.5) # Resetar a escala do eixo y
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
+        self.grafico.clear() # Limpar o grafico para remover os dados antigos
+        self.corGrafico = '#FF0000' # Resetar a cor do grafico para vermelho
+        self.plotar_dados() # Replotar os dados com a escala resetada
 
     def EscalaPositiva_clicado(self):
         print(f"Botao 4 clicado ") # Funcao para o botao 4
@@ -172,9 +194,21 @@ class JanelaGrafico(QtWidgets.QMainWindow):
         self.escalax = (self.escalax[0]* 0.9, self.escalax[1]*0.9) # Diminuir a escala do eixo x em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
 
+
+    def selecionar_cor_clicado(self):
+        cor_selecionada = self.caixa_texto_cor.getColor() # Abrir o seletor de cor e obter a cor selecionada
+        if cor_selecionada.isValid(): # Verificar se a cor selecionada é válida
+            self.corGrafico = cor_selecionada
+            self.grafico.clear() # Limpar o grafico para remover a cor antiga
+            self.plotar_dados() # Replotar os dados com a nova cor do grafico
+            self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Manter o range do grafico após a mudança de cor
+
+            
+
+
 app = QtWidgets.QApplication(sys.argv) # Criacao da aplicacao com a sys
 
-janela = JanelaGrafico() # Criacao da janela do grafico
-janela.show() # Mostrar a janela do grafico
+janela = JanelaOciloscopio() # Criacao da janela do osciloscopio
+janela.show() # Mostrar a janela do osciloscopio
 
 sys.exit(app.exec_()) # Executar a aplicacao
