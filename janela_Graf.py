@@ -59,6 +59,51 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         padding: 10px;
     }
 """
+    estiloTextoEscala = """
+            background-color: green;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #000000;
+        padding: 6px;
+        qproperty-alignment: AlignCenter;
+        """
+    estiloSlider = """
+        QSlider {
+            background-color: green;
+            border: 2px solid #000000;
+            padding: 6px;
+        }
+
+        QSlider::groove:horizontal {
+            background: green;
+            border: 2px solid #000000;
+            height: 8px;
+            border-radius: 0px;
+        }
+
+        QSlider::handle:horizontal {
+            background: white;
+            border: 2px solid #000000;
+            width: 18px;
+            height: 18px;
+            margin-top: -7px;
+            margin-bottom: -7px;
+            border-radius: 0px;
+        }
+
+        QSlider::sub-page:horizontal {
+            background: white;
+            border: 1px solid #000000;
+        }
+
+        QSlider::add-page:horizontal {
+            background: #006400;
+            border: 1px solid #000000;
+        }
+        """
+
+
     escalax =[-10, 10] # Escala do eixo x do grafico
     escalay = [-1.5, 1.5] # Escala do eixo y do grafico
     corGrafico = '#FF0000' # Cor do grafico
@@ -123,9 +168,26 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.layout_lateral.addWidget(self.EscalaNegativa) # Adicionar o botao 5 ao layout lateral
         self.EscalaNegativa.setStyleSheet(self.estiloBotoesEscala) # Aplicar o estilo ao botao 5
 
-        self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 4 e 5
-      
-      
+
+        #Slider escala x 
+        self.texto_slider = QtWidgets.QLabel("Slider da Escala")
+        self.texto_slider.setStyleSheet(self.estiloTextoEscala)
+        self.layout_lateral.addWidget(self.texto_slider)
+
+        self.slider_escala= QtWidgets.QSlider(QtCore.Qt.Horizontal) # Criacao do slider para a escala do eixo x
+        self.slider_escala.setMinimum(-100) # Valor minimo do slider
+        self.slider_escala.setMaximum(100) # Valor maximo do slider
+        self.slider_escala.setStyleSheet(self.estiloSlider)
+
+
+        self.layout_lateral.addWidget(self.slider_escala)
+        self.slider_escala.valueChanged.connect(self.slider_escala_acao) # Conectar a mudança de valor do slider a funcao slider_escala
+        self.val_slider = self.slider_escala.value() # Valor do slider para a escala do eixo x
+        #Layout dos botoes 
+        self.layout_lateral.addSpacing(20)
+
+        
+
         #Seletor de cor do grafico 
         self.botao_cor = QtWidgets.QPushButton("Selecionar Cor do Grafico") # Criacao do botao para selecionar a cor do grafico
         self.botao_cor.clicked.connect(self.selecionar_cor_clicado) # Conectar o clique do botao a funcao selecionar_cor_clicado
@@ -133,20 +195,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.caixa_texto_cor = QtWidgets.QColorDialog() # Criacao do seletor de cor
         self.layout_lateral.addWidget(self.botao_cor) # Adicionar o botao ao layout lateral
 
-        self.layout_lateral.addSpacing(20)
-
-
-        #Slider escala x 
-        self.slider_escala= QtWidgets.QSlider(QtCore.Qt.Horizontal) # Criacao do slider para a escala do eixo x
-        self.slider_escala.setMinimum(-100) # Valor minimo do slider
-        self.slider_escala.setMaximum(100) # Valor maximo do slider
-        self.layout_lateral.addWidget(self.slider_escala)
-        self.slider_escala.valueChanged.connect(self.slider_escala_acao) # Conectar a mudança de valor do slider a funcao slider_escala
-        self.val_slider = self.slider_escala.value() # Valor do slider para a escala do eixo x
-        #Layout dos botoes 
-
+        
         self.layout_lateral.addStretch()
-
 
         #Proporcao do grafico e do painel lateral
         self.leyout.addWidget(self.grafico, 7) # Adicionar o grafico ao layout com proporcao 7
