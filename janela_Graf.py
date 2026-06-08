@@ -185,7 +185,6 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.val_slider = self.slider_escala.value() # Valor do slider para a escala do eixo x
         #Layout dos botoes 
         self.layout_lateral.addSpacing(20)
-
         
 
         #Seletor de cor do grafico 
@@ -261,8 +260,10 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         if cor_selecionada.isValid(): # Verificar se a cor selecionada é válida
             self.corGrafico = cor_selecionada
             self.grafico.clear() # Limpar o grafico para remover a cor antiga
-            self.plotar_dados() # Replotar os dados com a nova cor do grafico
+            self.escalax=[-10,10]
             self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Manter o range do grafico após a mudança de cor
+
+            self.plotar_dados() # Replotar os dados com a nova cor do grafico
 
     def slider_escala_acao(self): 
         if self.slider_escala.value() - self.val_slider < 0: # Verificar se o valor do slider é positivo
