@@ -106,6 +106,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     escalax =[-10, 10] # Escala do eixo x do grafico
     escalay = [-1.5, 1.5] # Escala do eixo y do grafico
+    
+
     corGrafico = '#FF0000' # Cor do grafico
     
     def __init__(self): 
@@ -183,8 +185,10 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.layout_lateral.addWidget(self.slider_escala)
         self.slider_escala.valueChanged.connect(self.slider_escala_acao) # Conectar a mudança de valor do slider a funcao slider_escala
         self.val_slider = self.slider_escala.value() # Valor do slider para a escala do eixo x
-        #Layout dos botoes 
+
         self.layout_lateral.addSpacing(20)
+        
+
         
 
         #Seletor de cor do grafico 
@@ -194,7 +198,14 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.caixa_texto_cor = QtWidgets.QColorDialog() # Criacao do seletor de cor
         self.layout_lateral.addWidget(self.botao_cor) # Adicionar o botao ao layout lateral
 
-        
+        self.layout_lateral.addSpacing(20)
+
+        #Media do grafico 
+        self.media = 5.
+        self.media_graf = QtWidgets.QLabel(f"Media do grafico: {self.media}(placeholder)")
+        self.media_graf.setStyleSheet(self.estiloTextoEscala)
+        self.layout_lateral.addWidget(self.media_graf)
+
         self.layout_lateral.addStretch()
 
         #Proporcao do grafico e do painel lateral
@@ -214,11 +225,15 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Definir o range do grafico
 
     def plotar_dados(self):
-        x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 com 1000 pontos 
-        y = gerar_dados(x,1,0.3) # Gerar os dados do seno (Mutavel, ira variar de acordo com o que se deseja plotar)
+        x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 
+        self.dados = gerar_dados(x,1,0.3) 
+
+        y = self.dados
+        
 
         self.grafico.plot(x, y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
 
+    #def calcula_media(): 
 
 
     def Zoomout_clicado(self):
@@ -260,20 +275,50 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         if cor_selecionada.isValid(): # Verificar se a cor selecionada é válida
             self.corGrafico = cor_selecionada
             self.grafico.clear() # Limpar o grafico para remover a cor antiga
-            self.escalax=[-10,10]
-            self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Manter o range do grafico após a mudança de cor
+            self.slider_escala.setValue(0)
 
+            self.escalax=[-10,10]
+
+            self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Manter o range do grafico após a mudança de cor
             self.plotar_dados() # Replotar os dados com a nova cor do grafico
 
-    def slider_escala_acao(self): 
-        if self.slider_escala.value() - self.val_slider < 0: # Verificar se o valor do slider é positivo
-            self.val_slider = self.slider_escala.value() # Atualizar o valor do slider
-            self.escalax = (self.escalax[0]* 1.05, self.escalax[1] * 1.05) # Aumentar a escala do eixo x com base no valor do slider
-        elif self.slider_escala.value() - self.val_slider > 0: # Verificar se o valor do slider é negativo
-            self.val_slider = self.slider_escala.value() # Atualizar o valor do slider
-            self.escalax = (self.escalax[0]* 0.95, self.escalax[1] * 0.95) # Diminuir a escala do eixo x com base no valor do slider
-        self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
-       
+
+    def slider_escala_acao(self):
+        valor_atual = self.slider_escala.value()
+        #Ve se os limetes do grafico se ja alteram
+        if valor_atual == 0 and self.escalax[0] == -10 and self.escalax[1] == 10:
+            self.val_slider = 0
+            self.grafico.setXRange(-10, 10, padding=0)
+            return
+
+        diferenca = valor_atual - self.val_slider
+
+        # Se não houve mudança real, não faz nada
+        if diferenca == 0:
+            return
+
+        fator_passo = 0.95
+        fator = fator_passo ** diferenca
+
+        # Pega o range REAL atual do eixo X no gráfico
+        x_min, x_max = self.grafico.viewRange()[0]
+
+        centro_x = (x_min + x_max) / 2
+        metade_largura = (x_max - x_min) / 2
+
+        nova_metade_largura = metade_largura * fator
+
+        self.escalax = [
+            centro_x - nova_metade_largura,
+            centro_x + nova_metade_largura
+        ]
+
+        self.val_slider = valor_atual
+
+        # Atualiza somente o eixo X
+        self.grafico.setXRange(
+            self.escalax[0],self.escalax[1],padding=0)
+
 
 
 app = QtWidgets.QApplication(sys.argv) # Criacao da aplicacao com a sys
