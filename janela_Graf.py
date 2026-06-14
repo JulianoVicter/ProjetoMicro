@@ -16,6 +16,11 @@ def gerar_dados(x,amplitude, frequencia):
         
 
 
+def calcula_media(x):
+    return sum(x)/len(x)
+
+
+
 class JanelaOciloscopio(QtWidgets.QMainWindow):
     #Construtor da classe e declaracao de objetos
     contBotao1 = 0 # Contador para o botao 1 
@@ -110,6 +115,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     corGrafico = '#FF0000' # Cor do grafico
     
+    media =0 
+
     def __init__(self): 
         super().__init__()# Construtor da classe pai 
 
@@ -201,7 +208,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.layout_lateral.addSpacing(20)
 
         #Media do grafico 
-        self.media = 5.
+        
         self.media_graf = QtWidgets.QLabel(f"Media do grafico: {self.media}(placeholder)")
         self.media_graf.setStyleSheet(self.estiloTextoEscala)
         self.layout_lateral.addWidget(self.media_graf)
@@ -226,12 +233,11 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     def plotar_dados(self):
         x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 
-        self.dados = gerar_dados(x,1,0.3) 
-
+        self.dados =  gerar_dados(x,1,0.3)
         y = self.dados
         
-
-        self.grafico.plot(x, y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
+        self.media = calcula_media(y)
+        self.grafico.plot(x,y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
 
     #def calcula_media(): 
 
