@@ -16,8 +16,8 @@ def gerar_dados(x,amplitude, frequencia):
         
 
 
-def calcula_media(x):
-    return sum(x)/len(x)
+def calcula_media(val):
+    return sum(val)/len(val)
 
 
 
@@ -130,7 +130,15 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
             border: 1px solid #000000;
         }
         """
-
+    estiloTextoMedia = """
+        background-color: DarkCyan;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #000000;
+        padding: 6px;
+        qproperty-alignment: AlignCenter;
+        """
 
     escalax =[-10, 10] # Escala do eixo x do grafico
     escalay = [-1.5, 1.5] # Escala do eixo y do grafico
@@ -231,7 +239,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         #Media do grafico 
         
         self.media_graf = QtWidgets.QLabel(f"Media do grafico: {self.media}(placeholder)")
-        self.media_graf.setStyleSheet(self.estiloTextoEscala)
+        self.media_graf.setStyleSheet(self.estiloTextoMedia)
         self.layout_lateral.addWidget(self.media_graf)
 
         self.layout_lateral.addStretch()
@@ -258,6 +266,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         y = self.dados
         
         self.media = calcula_media(y)
+        self.media_graf.setText(f"Media do grafico: {self.media:.4f}")  # <-- a linha nova
+
         self.grafico.plot(x,y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
 
     #def calcula_media(): 
