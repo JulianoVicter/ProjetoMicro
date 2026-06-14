@@ -24,26 +24,49 @@ def calcula_media(x):
 class JanelaOciloscopio(QtWidgets.QMainWindow):
     #Construtor da classe e declaracao de objetos
     contBotao1 = 0 # Contador para o botao 1 
-    estiloBotoesZoom = """
-    QPushButton {
-        background-color: #b4452d;
+    estiloSliderZoom = """
+        QSlider {
+            background-color: #b4452d;
+            border: 2px solid #000000;
+            padding: 6px;
+        }
+
+        QSlider::groove:horizontal {
+            background: #b4452d;
+            border: 2px solid #000000;
+            height: 8px;
+            border-radius: 0px;
+        }
+
+        QSlider::handle:horizontal {
+            background: white;
+            border: 2px solid #000000;
+            width: 18px;
+            height: 18px;
+            margin-top: -7px;
+            margin-bottom: -7px;
+            border-radius: 0px;
+        }
+
+        QSlider::sub-page:horizontal {
+            background: white;
+            border: 1px solid #000000;
+        }
+
+        QSlider::add-page:horizontal {
+            background: #7a2e1d;
+            border: 1px solid #000000;
+        }
+        """
+    estiloTextoZoom = """
+            background-color: #b4452d;
         color: white;
         font-size: 16px;
         font-weight: bold;
         border: 2px solid #000000;
-        padding: 10px;
-    }
-"""
-    estiloBotoesEscala = """
-    QPushButton {
-        background-color: #7E8C54;
-        color: white;
-        font-size: 16px;
-        font-weight: bold;
-        border: 2px solid #000000;
-        padding: 10px;
-    }
-"""
+        padding: 6px;
+        qproperty-alignment: AlignCenter;
+        """
     estiloBotoeReset = """
     QPushButton {
         background-color: #000080;
@@ -111,7 +134,9 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     escalax =[-10, 10] # Escala do eixo x do grafico
     escalay = [-1.5, 1.5] # Escala do eixo y do grafico
-    
+    # Larguras/alturas BASE (referencia fixa, nunca muda)
+    base_meia_largura = 10   # eixo X: [-10, 10]
+    base_meia_altura  = 1.5  # eixo Y: [-1.5, 1.5]
 
     corGrafico = '#FF0000' # Cor do grafico
     
@@ -144,18 +169,6 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
         #Botoes 
 
-        # Botao 1 - Zoom Out
-        self.Zoomout = QtWidgets.QPushButton("Zoom Out") # Criacao do botao 1
-        self.Zoomout.clicked.connect(self.Zoomout_clicado) # Conectar o clique do botao 1 a funcao botao1_clicado
-        self.layout_lateral.addWidget(self.Zoomout) # Adicionar o botao 1 ao layout lateral
-        self.Zoomout.setStyleSheet(self.estiloBotoesZoom) # Aplicar o estilo ao botao 1
-        #Botao 2 - Zoom In
-        self.Zoomin = QtWidgets.QPushButton("Zoom In") # Criacao do botao 2
-        self.Zoomin.clicked.connect(self.Zoomin_clicado) # Conectar o clique do botao 2 a funcao botao2_clicado
-        self.layout_lateral.addWidget(self.Zoomin) # Adicionar o botao 2 ao layout lateral
-        self.Zoomin.setStyleSheet(self.estiloBotoesZoom) # Aplicar o estilo ao botao 2
-
-        self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 3 e 4
 
 
         #Botao 3 - Resetar 
@@ -166,16 +179,24 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         
         self.layout_lateral.addSpacing(20) # Adicionar um espaçamento entre os botões 3 e 4
 
-        #Botao 4 - Escala 
-        self.EscalaPositiva = QtWidgets.QPushButton("Escala Positiva") # Criacao do botao 4
-        self.EscalaPositiva.clicked.connect(self.EscalaPositiva_clicado) # Conectar o clique do botao 4 a funcao EscalaPositiva_clicado
-        self.layout_lateral.addWidget(self.EscalaPositiva) # Adicionar o botao 4 ao layout lateral
-        self.EscalaPositiva.setStyleSheet(self.estiloBotoesEscala) # Aplicar o estilo ao botao 4
-        #Botao 5 - Escala Negativa
-        self.EscalaNegativa = QtWidgets.QPushButton("Escala Negativa") #    Criacao do botao 5  
-        self.EscalaNegativa.clicked.connect(self.EscalaNegativa_clicado) # Conectar o clique do botao 5 a funcao EscalaNegativa_clicado
-        self.layout_lateral.addWidget(self.EscalaNegativa) # Adicionar o botao 5 ao layout lateral
-        self.EscalaNegativa.setStyleSheet(self.estiloBotoesEscala) # Aplicar o estilo ao botao 5
+      
+        #Slider Zoom 
+        self.texto_slider_zoom = QtWidgets.QLabel("Slider Zoom")
+        self.texto_slider_zoom.setStyleSheet(self.estiloTextoZoom)
+        self.layout_lateral.addWidget(self.texto_slider_zoom)
+
+        self.slider_escala_zoom= QtWidgets.QSlider(QtCore.Qt.Horizontal) # Criacao do slider para a escala do eixo x
+        self.slider_escala_zoom.setMinimum(-100) # Valor minimo do slider
+        self.slider_escala_zoom.setMaximum(100) # Valor maximo do slider
+        self.slider_escala_zoom.setStyleSheet(self.estiloSliderZoom)
+
+
+        self.layout_lateral.addWidget(self.slider_escala_zoom)
+        self.slider_escala_zoom.valueChanged.connect(self.slider_zoom_acao) # Conectar a mudança de valor do slider a funcao slider_escala
+        self.val_slider_zoom = self.slider_escala_zoom.value() # Valor do slider para a escala do eixo x
+
+        self.layout_lateral.addSpacing(20)
+
 
 
         #Slider escala x 
@@ -243,87 +264,66 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
 
     def Zoomout_clicado(self):
-        self.contBotao1 += 1
-        print(f"Botao 1 clicado {self.contBotao1} vezes") # Funcao para o botao 1
         self.escalax = (self.escalax[0] * 1.1, self.escalax[1] * 1.1) # Aumentar a escala do eixo x em 10%
         self.escalay = (self.escalay[0] * 1.1, self.escalay[1] * 1.1) # Aumentar a escala do eixo y em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
 
 
     def Zoomin_clicado(self):
-        print(f"Botao 2 clicado ") # Funcao para o botao 2
         self.escalax = (self.escalax[0] * 0.9, self.escalax[1] * 0.9) # Diminuir a escala do eixo x em 10%
         self.escalay = (self.escalay[0] * 0.9, self.escalay[1] * 0.9) # Diminuir a escala do eixo y em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
         
     def Resetar_clicado(self):
-        print(f"Botao 3 clicado ") # Funcao para o botao 3
-        self.escalax = (-10, 10) # Resetar a escala do eixo x
-        self.escalay = (-1.5, 1.5) # Resetar a escala do eixo y
-        self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
-        self.grafico.clear() # Limpar o grafico para remover os dados antigos
-        self.corGrafico = '#FF0000' # Resetar a cor do grafico para vermelho
-        self.plotar_dados() # Replotar os dados com a escala resetada
-        self.slider_escala.setValue(0) # Resetar o valor do slider para 0 após a ação
-
+        self.slider_escala.setValue(0)
+        self.slider_escala_zoom.setValue(0)
+        self.grafico.clear()
+        self.corGrafico = '#FF0000'
+        self.plotar_dados()
+        
     def EscalaPositiva_clicado(self):
-        print(f"Botao 4 clicado ") # Funcao para o botao 4
         self.escalax = (self.escalax[0]* 1.1, self.escalax[1]*1.1) # Aumentar a escala do eixo x em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
     def EscalaNegativa_clicado(self):
-        print(f"Botao 5 clicado ") # Funcao para o botao 5
         self.escalax = (self.escalax[0]* 0.9, self.escalax[1]*0.9) # Diminuir a escala do eixo x em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
 
 
     def selecionar_cor_clicado(self):
-        cor_selecionada = self.caixa_texto_cor.getColor() # Abrir o seletor de cor e obter a cor selecionada
-        if cor_selecionada.isValid(): # Verificar se a cor selecionada é válida
+        cor_selecionada = self.caixa_texto_cor.getColor()  
+        if cor_selecionada.isValid():
             self.corGrafico = cor_selecionada
-            self.grafico.clear() # Limpar o grafico para remover a cor antiga
-            self.slider_escala.setValue(0)
+            self.grafico.clear()   
+            self.plotar_dados()
+            self.atualizar_grafico()  # mantem o zoom/escala atuais
 
-            self.escalax=[-10,10]
 
-            self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Manter o range do grafico após a mudança de cor
-            self.plotar_dados() # Replotar os dados com a nova cor do grafico
+   
 
+    def atualizar_grafico(self):
+        # Le a posicao ABSOLUTA dos dois sliders
+        val_zoom   = self.slider_escala_zoom.value()  # -100 a 100 -> mexe X e Y
+        val_escala = self.slider_escala.value()        # -100 a 100 -> mexe so X
+
+        # Cada slider vira um fator exponencial. Posicao 0 -> fator 1.
+        fator_zoom   = 1.02 ** (-val_zoom)
+        fator_escala = 0.95 ** (val_escala)
+
+        # X recebe os dois fatores; Y so o do zoom
+        meia_largura = self.base_meia_largura * fator_zoom * fator_escala
+        meia_altura  = self.base_meia_altura  * fator_zoom
+
+        self.escalax = [-meia_largura, meia_largura] #Se a funcao necessitar a partir de 0 basta substituir esses valores, par [0,2*meia_largura] por exemplo 
+        self.escalay = [-meia_altura,  meia_altura]
+
+        self.grafico.setXRange(*self.escalax, padding=0)
+        self.grafico.setYRange(*self.escalay, padding=0)
 
     def slider_escala_acao(self):
-        valor_atual = self.slider_escala.value()
-        #Ve se os limetes do grafico se ja alteram
-        if valor_atual == 0 and self.escalax[0] == -10 and self.escalax[1] == 10:
-            self.val_slider = 0
-            self.grafico.setXRange(-10, 10, padding=0)
-            return
+        self.atualizar_grafico()
 
-        diferenca = valor_atual - self.val_slider
-
-        # Se não houve mudança real, não faz nada
-        if diferenca == 0:
-            return
-
-        fator_passo = 0.95
-        fator = fator_passo ** diferenca
-
-        # Pega o range REAL atual do eixo X no gráfico
-        x_min, x_max = self.grafico.viewRange()[0]
-
-        centro_x = (x_min + x_max) / 2
-        metade_largura = (x_max - x_min) / 2
-
-        nova_metade_largura = metade_largura * fator
-
-        self.escalax = [
-            centro_x - nova_metade_largura,
-            centro_x + nova_metade_largura
-        ]
-
-        self.val_slider = valor_atual
-
-        # Atualiza somente o eixo X
-        self.grafico.setXRange(
-            self.escalax[0],self.escalax[1],padding=0)
+    def slider_zoom_acao(self):
+        self.atualizar_grafico()
 
 
 
