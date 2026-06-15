@@ -4,17 +4,24 @@ import sys
 import pyqtgraph as pg 
 print("PyQtGraph Version: ", pg.__version__)
 
-def gerar_dados(x,amplitude, frequencia):
-    seno= amplitude * np.sin(2 * np.pi * frequencia * x)
-    ruido = np.random.uniform(
-        low=-0.05,
-        high=0.05,
-        size=len(x)
-    )
-    return seno + ruido -1.4042 
-    
-        
+def gera_dados(t, tipo, amplitude, frequencia):
+    # Simula UMA leitura do serial: o valor da onda no instante t
+    if tipo == 'seno':
+        valor = amplitude * np.sin(2 * np.pi * frequencia * t)
+    elif tipo == 'cosseno':
+        valor = amplitude * np.cos(2 * np.pi * frequencia * t)
+    elif tipo == 'quadrada':
+        valor = amplitude * np.sign(np.sin(2 * np.pi * frequencia * t))
+    elif tipo == 'triangular':
+        fase = frequencia * t - np.floor(frequencia * t + 0.5)
+        valor = amplitude * (2 * np.abs(2 * fase) - 1)
+    elif tipo == 'dente_serra':
+        valor = amplitude * 2 * (frequencia * t - np.floor(0.5 + frequencia * t))
+    else:
+        valor = 0.0
 
+    ruido = np.random.uniform(-0.05, 0.05)  # sem 'size' -> retorna UM float só
+    return valor + ruido + 6
 
 def calcula_media(val):
     return sum(val)/len(val)
@@ -144,17 +151,17 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
     escalay = [-1.5, 1.5] # Escala do eixo y do grafico
     # Larguras/alturas BASE (referencia fixa, nunca muda)
     base_meia_largura = 10   # eixo X: [-10, 10]
-    base_meia_altura  = 1.5  # eixo Y: [-1.5, 1.5]
-    fator_desloc = 0
-
+    base_meia_altura  = 1.5  # eixo Y: [-1.5, 1.5] 
+    largura_janela = 10.0   # segundos visiveis no X
+    fator_desloc = 0 
     corGrafico = '#FF0000' # Cor do grafico
-    
     media =0 
 
     def __init__(self): 
         super().__init__()# Construtor da classe pai 
 
-
+        
+        #Defs da tela
         self.setWindowTitle("Ociloscopio")# Titulo da janela
         self.resize(1024, 640) # Tamanho da janela
 
@@ -176,9 +183,25 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.layout_lateral = QtWidgets.QVBoxLayout() # Criacao do layout vertical para o painel lateral
         self.painel_lateral.setLayout(self.layout_lateral) # Setar o layout no painel lateral
 
+#aquisicao da funcao matematica 
+        self.tipo_onda = 'seno'   # qual onda "receber"
+        self.t = 0.0     # tempo atual (s)
+        self.dt = 0.008     # passo de tempo por amostra (s)
+        self.max_pontos = 1000    # janela rolante: quantas amostras manter
+        self.buffer_x = []      # tempos recebidos
+        self.buffer_y = []      # valores recebidos
+
+        # Curva criada uma vez. Depois so atualizamos com setData.
+        self.curva = self.grafico.plot([], [], pen=self.corGrafico)
+
+        # Timer que dispara a leitura periodicamente
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.receber_serial)
+        self.timer.start(20)   # 20 ms -> ~50 leituras por segundo
+    
+
+
         #Botoes 
-
-
 
         #Botao 3 - Resetar 
         self.Resetar = QtWidgets.QPushButton("Resetar") # Criacao do botao 3
@@ -251,7 +274,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
 
         self.configurar_grafico() # Configurar o grafico
-        self.plotar_dados() # Plotar os dados no grafico
+        self.atualizar_grafico()
+        #self.plotar_dados() # Plotar os dados no grafico
 
 
 
@@ -261,15 +285,15 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.grafico.showGrid(x=True, y=True) # Mostrar grid no grafico
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Definir o range do grafico
 
-    def plotar_dados(self):
-        x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 
-        self.dados =  gerar_dados(x,1,0.3)
-        y = self.dados
-        self.media = calcula_media(y)
-        self.fator_desloc= self.media
-        self.media_graf.setText(f"Media do grafico: {self.media:.4f}")  # <-- a linha nova
-        self.grafico.plot(x,y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
-        self.atualizar_grafico()
+    # def plotar_dados(self):
+    #     x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 
+    #     self.dados =  gera_dados(x,1,1,0.3)
+    #     y = self.dados
+    #     self.media = calcula_media(y)
+    #     self.fator_desloc= self.media
+    #     self.media_graf.setText(f"Media do grafico: {self.media:.4f}")  # <-- a linha nova
+    #     self.grafico.plot(x,y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
+    #     self.atualizar_grafico()
 
 
     def Zoomout_clicado(self):
@@ -283,12 +307,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.escalay = (self.escalay[0] * 0.9, self.escalay[1] * 0.9) # Diminuir a escala do eixo y em 10%
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
         
-    def Resetar_clicado(self):
-        self.slider_escala.setValue(0)
-        self.slider_escala_zoom.setValue(0)
-        self.grafico.clear()
-        self.corGrafico = '#FF0000'
-        self.plotar_dados()
+
         
     def EscalaPositiva_clicado(self):
         self.escalax = (self.escalax[0]* 1.1, self.escalax[1]*1.1) # Aumentar a escala do eixo x em 10%
@@ -298,35 +317,38 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.grafico.setRange(xRange=self.escalax, yRange=self.escalay) # Atualizar o range do grafico
 
 
+    def Resetar_clicado(self):
+        self.slider_escala.setValue(0)
+        self.slider_escala_zoom.setValue(0)
+        self.buffer_x.clear()
+        self.buffer_y.clear()
+        self.t = 0.0
+        self.corGrafico = '#FF0000'
+        self.curva.setPen(self.corGrafico)
+
     def selecionar_cor_clicado(self):
-        cor_selecionada = self.caixa_texto_cor.getColor()  
-        if cor_selecionada.isValid():
-            self.corGrafico = cor_selecionada
-            self.grafico.clear()   
-            self.plotar_dados()
-            self.atualizar_grafico()  # mantem o zoom/escala atuais
+        cor = self.caixa_texto_cor.getColor()
+        if cor.isValid():
+            self.corGrafico = cor
+            self.curva.setPen(self.corGrafico)   # so troca a caneta, sem replotar
 
 
    
 
     def atualizar_grafico(self):
-        # Le a posicao ABSOLUTA dos dois sliders
-        val_zoom   = self.slider_escala_zoom.value()  # -100 a 100 -> mexe X e Y
-        val_escala = self.slider_escala.value()        # -100 a 100 -> mexe so X
+        val_zoom   = self.slider_escala_zoom.value()
+        val_escala = self.slider_escala.value()
 
-        # Cada slider vira um fator exponencial. Posicao 0 -> fator 1.
         fator_zoom   = 1.02 ** (-val_zoom)
         fator_escala = 0.95 ** (val_escala)
 
-        # X recebe os dois fatores; Y so o do zoom
-        meia_largura = self.base_meia_largura * fator_zoom * fator_escala
-        meia_altura  = self.base_meia_altura  * fator_zoom
+        # Largura da janela no tempo (X comeca em 0)
+        self.largura_janela = (2 * self.base_meia_largura) * fator_zoom * fator_escala
+        meia_altura = self.base_meia_altura * fator_zoom
 
-        self.escalax = [-meia_largura, meia_largura] #Se a funcao necessitar a partir de 0 basta substituir esses valores, par [0,2*meia_largura] por exemplo 
-        self.escalay = [-meia_altura,  meia_altura]
-
-        self.grafico.setXRange(*self.escalax, padding=0)
-        self.grafico.setYRange(self.escalay[0]+self.fator_desloc,self.escalay[1]+self.fator_desloc, padding=0)
+        self.grafico.setXRange(0, self.largura_janela, padding=0)
+        self.grafico.setYRange(-meia_altura + self.fator_desloc,
+                                meia_altura + self.fator_desloc, padding=0)
 
     def slider_escala_acao(self):
         self.atualizar_grafico()
@@ -334,7 +356,30 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
     def slider_zoom_acao(self):
         self.atualizar_grafico()
 
-    
+    def receber_serial(self):
+        valor = gera_dados(self.t, self.tipo_onda, 1, 3)
+
+        # Chegou na borda direita? Limpa e recomeca do zero.
+        if self.t > self.largura_janela:
+            self.buffer_x.clear()
+            self.buffer_y.clear()
+            self.t = 0.0
+
+        self.buffer_x.append(self.t)
+        self.buffer_y.append(valor)
+
+        self.t += self.dt
+
+        self.curva.setData(self.buffer_x, self.buffer_y)
+
+        if self.buffer_y:
+            self.media = calcula_media(self.buffer_y)
+            self.media_graf.setText(f"Media do grafico: {self.media:.4f}")
+            if (self.media - self.fator_desloc > 0.5 or self.media - self.fator_desloc < -0.5) :
+                self.fator_desloc = self.media 
+                meia_altura = self.base_meia_altura * (1.02 ** (-self.slider_escala_zoom.value()))
+                self.grafico.setYRange(-meia_altura + self.fator_desloc,
+                                    meia_altura + self.fator_desloc, padding=0) 
 
 
 
