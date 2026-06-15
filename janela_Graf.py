@@ -11,7 +11,7 @@ def gerar_dados(x,amplitude, frequencia):
         high=0.05,
         size=len(x)
     )
-    return seno + ruido 
+    return seno + ruido -1.4042 
     
         
 
@@ -145,6 +145,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
     # Larguras/alturas BASE (referencia fixa, nunca muda)
     base_meia_largura = 10   # eixo X: [-10, 10]
     base_meia_altura  = 1.5  # eixo Y: [-1.5, 1.5]
+    fator_desloc = 0
 
     corGrafico = '#FF0000' # Cor do grafico
     
@@ -264,13 +265,11 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         x = np.linspace(self.escalax[0], self.escalax[1], 1000)# Mostra no intervalo de -10 a 10 
         self.dados =  gerar_dados(x,1,0.3)
         y = self.dados
-        
         self.media = calcula_media(y)
+        self.fator_desloc= self.media
         self.media_graf.setText(f"Media do grafico: {self.media:.4f}")  # <-- a linha nova
-
         self.grafico.plot(x,y, pen= self.corGrafico) # Plotar os dados no grafico com a cor vermelha
-
-    #def calcula_media(): 
+        self.atualizar_grafico()
 
 
     def Zoomout_clicado(self):
@@ -327,13 +326,16 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.escalay = [-meia_altura,  meia_altura]
 
         self.grafico.setXRange(*self.escalax, padding=0)
-        self.grafico.setYRange(*self.escalay, padding=0)
+        self.grafico.setYRange(self.escalay[0]+self.fator_desloc,self.escalay[1]+self.fator_desloc, padding=0)
 
     def slider_escala_acao(self):
         self.atualizar_grafico()
 
     def slider_zoom_acao(self):
         self.atualizar_grafico()
+
+    
+
 
 
 
