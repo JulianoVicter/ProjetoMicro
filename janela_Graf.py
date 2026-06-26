@@ -3,20 +3,18 @@ import numpy as np
 import sys
 import pyqtgraph as pg
 import serial
-import struct
 
 
 print("PyQtGraph Version: ", pg.__version__)
+print(">>> RODANDO janela_Graf_esp32.py (conversao ADC->tensao 0..3.3 V ATIVA) <<<")
 
-# ---- Formato do pacote binario vindo do ESP32 ----
-HEADER_FMT = '<Hff'                            # quantidadeAmostras (uint16), taxaReal (float), frequenciaDetectada (float)
-HEADER_SIZE = struct.calcsize(HEADER_FMT)      # 10 bytes
-N_AMOSTRAS = 256
-TAMANHO_PACOTE = HEADER_SIZE + N_AMOSTRAS * 2  # 10 + 512 = 522 bytes
+# ---- Calibracao do ADC (ESP32, 12 bits) ----
+V_REF = 3.3
+ADC_MAX = 4095
 
-# ---- Calibracao do ADC ----
-V_REF = 3.3        # tensao de referencia do ADC
-ADC_MAX = 4095     # ADC de 12 bits -> 0..4095
+
+def calcula_media(val):
+    return sum(val) / len(val)
 
 
 class JanelaOciloscopio(QtWidgets.QMainWindow):
@@ -172,17 +170,11 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         }
         """
 
-    escalax = [-10, 10]  # Escala do eixo x do grafico
-    escalay = [-1.5, 1.5]  # Escala do eixo y do grafico
-    # Larguras/alturas BASE (referencia fixa, nunca muda)
-    base_meia_largura = 10   # eixo X
-    base_meia_altura = 1.5   # eixo Y: [-1.5, 1.5]
-    largura_janela = 10.0    # segundos visiveis no X
     corGrafico = '#FF0000'   # Cor do grafico
     media = 0
-    taxa_real = 1000.0       # taxa de amostragem (Hz); default ate chegar o 1o pacote
 
-    porta = serial.Serial(port='/dev/cu.usbserial-0001', baudrate=9600, timeout=0.1)
+    # baud 115200 (igual ao firmware). Ajuste a porta com 'ls /dev/cu.*'
+    porta = serial.Serial(port='/dev/cu.usbserial-0001', baudrate=115200, timeout=0.1)
 
     def __init__(self):
         super().__init__()  # Construtor da classe pai
@@ -212,82 +204,100 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.layout_horizontal = QtWidgets.QVBoxLayout()
         self.painel_horizontal.setLayout(self.layout_horizontal)
 
-        # ---- Aquisicao por pacotes binarios ----
+        # ================= BASE DE TEMPO (eixo X) =================
+        # fs = taxa de amostragem REAL do ADC no firmware (Hz). dt_ms e derivado dela
+        # e e FIXO: nao depende de nenhum slider. E o que mantem o eixo X sincronizado
+        # com o sinal real (mexer na escala nao muda o espacamento das amostras).
+        self.fs = 1000.0                   # Hz  <-- TROCAR pela taxa real do ESP32
+        self.dt_ms = 1000.0 / self.fs      # ms entre amostras (FIXO)
+        self.n_div = 10                    # numero de divisoes horizontais visiveis
+        self.ms_por_div = 25               # escala de tempo inicial (ms/div)
+
+        # ================= AQUISICAO (frame a frame) =================
+        self._buf = ''                     # pedaco de linha incompleta entre ticks
+        self.N = 256                       # amostras por pacote (igual ao firmware)
+        self.frame = []                    # acumula o pacote em andamento
+        self.largura_pacote = self.N * self.dt_ms   # duracao total de 1 pacote (ms)
+
+        # ================= AMPLITUDE (eixo Y) =================
+        # Exibicao em steps: a base fica ANCORADA no 0 e o TOPO desce em steps.
+        # Topo menor -> a mesma onda ocupa mais altura da tela -> "estica pra cima".
+        # Isso NAO toca nos dados plotados, so muda a janela de visualizacao (setYRange).
+        self.y_min = 0.0                            # base ancorada no zero (nao muda)
+        self.escalas_topo = [V_REF, 2.0, 1.0, 0.5]  # topo do eixo Y (V); menor = mais esticado
+        self.idx_amplitude = 0                      # comeca no topo 3.3 V (onda no fundo)
+
         # Curva criada uma vez. Depois so atualizamos com setData.
         self.curva = self.grafico.plot([], [], pen=self.corGrafico)
 
         # Timer que dispara a leitura periodicamente
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.receber_serial)
-        self.timer.start(20)   # 20 ms -> tenta ler um pacote a cada ciclo
+        self.timer.start(20)   # 20 ms -> ~50 ciclos de leitura por segundo
 
-        # Botoes
+        # ===================== BOTOES / SLIDERS =====================
 
-        # Botao 3 - Resetar
-        self.Resetar = QtWidgets.QPushButton("Resetar")  # Criacao do botao 3
-        self.Resetar.clicked.connect(self.Resetar_clicado)  # Conectar o clique do botao 3
-        self.layout_lateral.addWidget(self.Resetar)  # Adicionar o botao 3 ao layout lateral
-        self.Resetar.setStyleSheet(self.estiloBotoeReset)  # Aplicar o estilo ao botao 3
+        # Botao - Resetar
+        self.Resetar = QtWidgets.QPushButton("Resetar")
+        self.Resetar.clicked.connect(self.Resetar_clicado)
+        self.layout_lateral.addWidget(self.Resetar)
+        self.Resetar.setStyleSheet(self.estiloBotoeReset)
 
-        self.layout_lateral.addSpacing(20)  # Espacamento
+        self.layout_lateral.addSpacing(20)
 
-        # Slider Amplitude
+        # Slider Amplitude (escala vertical em steps)
         self.texto_amplitude = QtWidgets.QLabel("Slider Amplitude")
         self.texto_amplitude.setStyleSheet(self.estiloTextoAmplitude)
         self.layout_lateral.addWidget(self.texto_amplitude)
 
-        self.slider_amplitude = QtWidgets.QSlider(QtCore.Qt.Horizontal)  # Slider de amplitude (zoom vertical)
-        self.slider_amplitude.setMinimum(-100)  # Valor minimo do slider
-        self.slider_amplitude.setMaximum(100)  # Valor maximo do slider
+        self.slider_amplitude = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_amplitude.setMinimum(0)                               # indice na lista
+        self.slider_amplitude.setMaximum(len(self.escalas_topo) - 1)      # ultimo indice
+        self.slider_amplitude.setSingleStep(1)
+        self.slider_amplitude.setValue(0)
         self.slider_amplitude.setStyleSheet(self.estiloSliderAmplitude)
 
         self.layout_lateral.addWidget(self.slider_amplitude)
-        self.slider_amplitude.valueChanged.connect(self.slider_amplitude_acao)  # Conectar mudanca de valor
-        self.val_slider_amplitude = self.slider_amplitude.value()  # Valor do slider de amplitude
+        self.slider_amplitude.valueChanged.connect(self.slider_amplitude_acao)
+        self.val_slider_amplitude = self.slider_amplitude.value()
 
         self.layout_lateral.addSpacing(20)
 
-        # Slider offset
-        self.slider_offset = QtWidgets.QSlider(QtCore.Qt.Vertical)  # Criacao do slider
+        # Slider offset (desloca a janela vertical pra cima/baixo)
+        self.slider_offset = QtWidgets.QSlider(QtCore.Qt.Vertical)
         self.slider_offset.setMaximum(100)
         self.slider_offset.setMinimum(-100)
         self.slider_offset.setStyleSheet(self.estiloSliderDeslocamento)
         self.layout_horizontal.addWidget(self.slider_offset)
 
         self.slider_offset.valueChanged.connect(self.slider_offset_acao)
-        
-
-        self.slider_offset.valueChanged.connect(self.slider_offset_acao)
-
-        # Caixa de texto com o valor do offset
-        self.texto_offset = QtWidgets.QLabel("Offset: 0.0 V")
-        self.texto_offset.setStyleSheet(self.estiloTextoMedia)
-        self.layout_horizontal.addWidget(self.texto_offset)
 
         self.layout_horizontal.addStretch()
 
-        # Slider escala x
+        # Slider escala X (escala de tempo, ms/div)
         self.texto_slider = QtWidgets.QLabel("Slider da Escala")
         self.texto_slider.setStyleSheet(self.estiloTextoEscala)
         self.layout_lateral.addWidget(self.texto_slider)
 
-        self.slider_escala = QtWidgets.QSlider(QtCore.Qt.Horizontal)  # Slider para a escala do eixo x
-        self.slider_escala.setMinimum(-100)  # Valor minimo do slider
-        self.slider_escala.setMaximum(100)  # Valor maximo do slider
+        self.slider_escala = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_escala.setMinimum(1)      # 1 ms/div minimo
+        self.slider_escala.setMaximum(50)     # 50 ms/div maximo
+        self.slider_escala.setSingleStep(1)
+        self.slider_escala.setValue(self.ms_por_div)
         self.slider_escala.setStyleSheet(self.estiloSlider)
 
         self.layout_lateral.addWidget(self.slider_escala)
-        self.slider_escala.valueChanged.connect(self.slider_escala_acao)  # Conectar mudanca de valor
-        self.val_slider = self.slider_escala.value()  # Valor do slider para a escala do eixo x
+        self.slider_escala.valueChanged.connect(self.slider_escala_acao)
+        self.val_slider = self.slider_escala.value()
 
         self.layout_lateral.addSpacing(20)
 
         # Seletor de cor do grafico
-        self.botao_cor = QtWidgets.QPushButton("Selecionar Cor do Grafico")  # Botao para selecionar cor
-        self.botao_cor.clicked.connect(self.selecionar_cor_clicado)  # Conectar o clique
-        self.botao_cor.setStyleSheet(self.estiloBotaoCor)  # Aplicar o estilo
-        self.caixa_texto_cor = QtWidgets.QColorDialog()  # Criacao do seletor de cor
-        self.layout_lateral.addWidget(self.botao_cor)  # Adicionar o botao ao layout lateral
+        self.botao_cor = QtWidgets.QPushButton("Selecionar Cor do Grafico")
+        self.botao_cor.clicked.connect(self.selecionar_cor_clicado)
+        self.botao_cor.setStyleSheet(self.estiloBotaoCor)
+        self.caixa_texto_cor = QtWidgets.QColorDialog()
+        self.layout_lateral.addWidget(self.botao_cor)
 
         self.layout_lateral.addSpacing(20)
 
@@ -296,36 +306,31 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.media_graf.setStyleSheet(self.estiloTextoMedia)
         self.layout_lateral.addWidget(self.media_graf)
 
-        self.layout_lateral.addSpacing(20)
-
-        # Frequencia detectada (vem do header do pacote)
-        self.freq_label = QtWidgets.QLabel("Frequencia: 0.0 Hz")
-        self.freq_label.setStyleSheet(self.estiloTextoMedia)
-        self.layout_lateral.addWidget(self.freq_label)
-
         self.layout_lateral.addStretch()
 
         # Proporcao do grafico e do painel lateral
-        self.leyout.addWidget(self.grafico, 7)  # Grafico com proporcao 7
-        self.leyout.addWidget(self.painel_lateral, 2)  # Painel lateral com proporcao 2
+        self.leyout.addWidget(self.grafico, 7)
+        self.leyout.addWidget(self.painel_lateral, 2)
         self.leyout.addWidget(self.painel_horizontal, 1)
 
         self.configurar_grafico()  # Configurar o grafico
-        self.atualizar_grafico()
+        self.atualizar_grafico()   # define escala X/Y antes do primeiro tick
 
     def configurar_grafico(self):
         self.grafico.setLabel('left', 'Amplitude', units='V')  # eixo y do grafico
-        self.grafico.setLabel('bottom', 'Tempo', units='s')    # eixo x do grafico
+        self.grafico.setLabel('bottom', 'Tempo', units='ms')   # eixo x do grafico
         self.grafico.showGrid(x=True, y=True)  # Mostrar grid no grafico
-        self.grafico.setRange(xRange=self.escalax, yRange=self.escalay)  # Range inicial
+        self.grafico.enableAutoRange(axis='y', enable=False)  # impede o pyqtgraph de reescalar o Y sozinho
+        self.grafico.enableAutoRange(axis='x', enable=False)  # idem no X
 
     def Resetar_clicado(self):
-        self.slider_escala.setValue(0)
-        self.slider_amplitude.setValue(0)
+        self.slider_escala.setValue(25)      # 25 ms/div
+        self.slider_amplitude.setValue(0)    # idx 0 = topo 3.3 V (sem esticar)
         self.slider_offset.setValue(0)
+        self.frame = []
+        self.curva.setData([], [])
         self.corGrafico = '#FF0000'
         self.curva.setPen(self.corGrafico)
-        self.curva.setData([], [])
 
     def selecionar_cor_clicado(self):
         cor = self.caixa_texto_cor.getColor()
@@ -334,22 +339,36 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
             self.curva.setPen(self.corGrafico)   # so troca a caneta, sem replotar
 
     def atualizar_eixo_y(self):
-        meia_altura = self.base_meia_altura * (1.02 ** (-self.slider_amplitude.value()))
-        self.grafico.setYRange(-meia_altura, meia_altura, padding=0)
+        # Escala vertical em steps. So mexe na EXIBICAO (setYRange), nunca nos dados.
+        # base ancorada no 0; topo desce conforme o slider sobe -> onda estica pra cima.
+        self.idx_amplitude = self.slider_amplitude.value()
+        y_topo = self.escalas_topo[self.idx_amplitude]
+
+        # offset desloca a janela inteira pra cima/baixo (pan). Em 0, base fica no zero.
+        # Se a direcao parecer invertida, troque o sinal de 'desloc'.
+        val_off = self.slider_offset.value()
+        desloc = (val_off / 100.0) * y_topo
+
+        self.grafico.setYRange(self.y_min + desloc, y_topo + desloc, padding=0)
+
+        # feedback do valor atual no proprio rotulo do slider
+        self.texto_amplitude.setText(f"Amplitude: topo {y_topo} V")
 
     def atualizar_grafico(self):
-        val_escala = self.slider_escala.value()
-        fator_escala = 0.95 ** val_escala
+        # --- Eixo X (escala de tempo em ms/div) ---
+        self.ms_por_div = self.slider_escala.value()         # valor do slider = ms/div
+        largura_ms = self.n_div * self.ms_por_div            # janela total = n_div * (ms/div)
 
-        # Janela natural do eixo X = duracao de um pacote = N_AMOSTRAS / taxa de amostragem
-        if self.taxa_real > 0:
-            janela_base = N_AMOSTRAS / self.taxa_real
-        else:
-            janela_base = 1.0
+        self.grafico.setXRange(0, largura_ms, padding=0)
 
-        self.largura_janela = janela_base * fator_escala
-        self.grafico.setXRange(0, self.largura_janela, padding=0)
-        self.atualizar_eixo_y()   # Y vem da fonte unica
+        # trava o grid: 1 linha por divisao, cada uma valendo ms_por_div
+        eixo_x = self.grafico.getAxis('bottom')
+        ticks = [(d * self.ms_por_div, str(d * self.ms_por_div)) for d in range(self.n_div + 1)]
+        eixo_x.setTicks([ticks])
+        self.texto_slider.setText(f"Escala: {self.ms_por_div} ms/div")
+
+        # --- Eixo Y (amplitude) ---
+        self.atualizar_eixo_y()
 
     def slider_escala_acao(self):
         self.atualizar_grafico()
@@ -358,45 +377,33 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.atualizar_grafico()
 
     def slider_offset_acao(self):
-        self.texto_offset.setText(f"Offset: {self.slider_offset.value() / 10.0:.1f} V")
-
         self.atualizar_grafico()
 
     def receber_serial(self):
-        # So processa quando ja chegou um pacote inteiro
-        if self.porta.in_waiting < TAMANHO_PACOTE:
-            return
+        n = self.porta.in_waiting
+        if n:
+            self._buf += self.porta.read(n).decode('ascii', errors='ignore')
 
-        dados = self.porta.read(TAMANHO_PACOTE)
-        if len(dados) < TAMANHO_PACOTE:
-            return
+        partes = self._buf.split('\n')
+        self._buf = partes.pop()        # ultimo pedaco = linha incompleta, volta pro buffer
 
-        quantidade, taxa_real, freq_detectada = struct.unpack(HEADER_FMT, dados[:HEADER_SIZE])
-        quantidade = min(quantidade, N_AMOSTRAS)   # protege contra header corrompido
+        for linha in partes:
+            linha = linha.strip()       # tira o \r do \r\n
 
-        amostras = np.frombuffer(dados[HEADER_SIZE:], dtype='<u2').astype(float)[:quantidade]
-
-        # ADC bruto (0..4095) -> tensao centrada em zero + offset manual do slider
-        y = (amostras / ADC_MAX) * V_REF - (V_REF / 2.0) + (self.slider_offset.value() / 10.0)
-
-        # Se a taxa de amostragem mudou, reajusta a janela do eixo X
-        if taxa_real > 0 and abs(taxa_real - self.taxa_real) > 1.0:
-            self.taxa_real = taxa_real
-            self.atualizar_grafico()
-
-        # Eixo X em segundos, reconstruido a partir da taxa de amostragem
-        if self.taxa_real > 0:
-            x = np.arange(len(y)) / self.taxa_real
-        else:
-            x = np.arange(len(y))
-
-        self.curva.setData(x, y)
-
-        self.freq_label.setText(f"Frequencia: {freq_detectada:.1f} Hz")
-
-        if len(y):
-            self.media = float(np.mean(y))
-            self.media_graf.setText(f"Media do grafico: {self.media:.4f}")
+            if linha.isdigit():
+                bruto = int(linha)
+                if 0 <= bruto <= 4095:
+                    self.frame.append(bruto)
+                    if len(self.frame) >= self.N:
+                        y = [(b / ADC_MAX) * V_REF for b in self.frame]
+                        x = [i * self.dt_ms for i in range(len(self.frame))]
+                        self.curva.setData(x, y)
+                        self.media = calcula_media(y)
+                        self.media_graf.setText(f"Media do grafico: {self.media:.4f} V")
+                        self.frame = []
+            else:
+                if '_Update' in linha and self.frame:
+                    self.frame = []     # ressincroniza no marcador do GxEPD2
 
 
 app = QtWidgets.QApplication(sys.argv)  # Criacao da aplicacao com a sys
