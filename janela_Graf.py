@@ -372,7 +372,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     def configurar_grafico(self):
         self.grafico.setLabel('left', 'Amplitude', units='V')  # eixo y do grafico
-        self.grafico.setLabel('bottom', 'Tempo', units='ms')   # eixo x do grafico
+        self.grafico.setLabel('bottom', 'Tempo', units='µs')   # eixo x do grafico
         self.grafico.showGrid(x=True, y=True)  # Mostrar grid no grafico
         self.grafico.enableAutoRange(axis='y', enable=False)  # impede o pyqtgraph de reescalar o Y sozinho
         self.grafico.enableAutoRange(axis='x', enable=False)  # idem no X
@@ -421,7 +421,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         # grid: n_div linhas dividindo a janela exibida
         eixo_x = self.grafico.getAxis('bottom')
         ms_por_div_real = largura_ms / self.n_div
-        ticks = [(d * ms_por_div_real, f"{d * ms_por_div_real:.3f}") for d in range(self.n_div + 1)]
+        ticks = [(d * ms_por_div_real, f"{d * ms_por_div_real * 1000:2.0f}")for d in range(self.n_div + 1)]
         eixo_x.setTicks([ticks])
         self.texto_slider.setText(f"Janela: {largura_ms:.3f} ms (x{fator})")
 
@@ -469,7 +469,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
                 if len(partes_marcador) == 2:
                     try:
                         tempo_coleta_s = float(partes_marcador[1])
-                        self.dt_ms = (tempo_coleta_s*100 ) / self.N
+                        self.dt_ms = (tempo_coleta_s*1000 ) / self.N
                         self.dur_real_ms = self.N * self.dt_ms   # duracao real do frame
                         self.atualizar_grafico()                 # reaplica escala X com o novo intervalo
                     except ValueError:
