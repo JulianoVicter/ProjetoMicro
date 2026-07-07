@@ -230,36 +230,28 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.painel_horizontal.setLayout(self.layout_horizontal)
 
         # ================= BASE DE TEMPO (eixo X) =================
-        # fs = taxa de amostragem REAL do ADC no firmware (Hz). dt_ms e derivado dela
-        # e e FIXO: nao depende de nenhum slider. E o que mantem o eixo X sincronizado
-        # com o sinal real (mexer na escala nao muda o espacamento das amostras).
-        # OBS: o firmware comeca em 20000 Hz (taxaAtual) e ajusta dinamicamente
-        # entre 5000 e 50000 Hz. Enquanto a taxa nao for enviada junto do frame,
-        # 20000.0 e a melhor aproximacao.
+        # fs = taxa de amostragem inicial do ADC no firmware (Hz). dt_ms e derivado dela
+        # e passa a ser ATUALIZADO a cada frame quando o firmware envia o tempo de
+        # coleta junto do marcador ('_Update:<tempo_s>'). E o que mantem o eixo X
+        # sincronizado com o sinal real.
         self.fs = 20000.0                  # Hz  (taxa inicial do firmware)
-        self.dt_ms = 1000.0 / self.fs      # ms entre amostras (FIXO)
+        self.dt_ms = 1000.0 / self.fs      # ms entre amostras (recalculado por frame)
         self.n_div = 10                    # numero de divisoes horizontais visiveis
-        self.ms_por_div = 25               # escala de tempo inicial (ms/div)
-        passo_freq = 1  # ms/div, distancia entre cada step (ajuste pra controlar o range)
-        self.escalas_freq = [
-            5 + 4*passo_freq,
-            5 + 3*passo_freq,
-            5 + 2*passo_freq,
-            5 + 1*passo_freq,
-            5,
-            5 - 1*passo_freq,
-            5 - 2*passo_freq,
-            5 - 3*passo_freq,
-            5 - 4*passo_freq,
-        ]  # ms/div; simetrico em torno de 5
-        self.idx_freq = 0
 
         # ================= AQUISICAO (frame a frame) =================
         self._buf = ''                     # pedaco de linha incompleta entre ticks
         self.N = 256                       # amostras por pacote (igual ao firmware)
         self.frame = []                    # acumula o pacote em andamento
         self.sincronizado = False          # so acumula amostras depois do 1o '_Update'
-        self.largura_pacote = self.N * self.dt_ms   # duracao total de 1 pacote (ms)
+
+        # duracao real do frame (ms) = N amostras * dt entre amostras.
+        # Atualizada a cada frame em receber_serial (dt_ms vem do firmware).
+        self.dur_real_ms = self.N * self.dt_ms
+
+        # escalas como MULTIPLOS/DIVISOES do intervalo real do frame.
+        # 1.0 = frame inteiro; <1 = zoom in (menos tempo); >1 = zoom out.
+        self.escalas_freq = [2.0, 1.0, 0.5, 0.25, 0.125]
+        self.idx_freq = 1   # comeca em 1.0 = frame inteiro
 
         # ================= AMPLITUDE (eixo Y) =================
         # Exibicao em steps: a base fica ANCORADA no 0 e o TOPO desce em steps.
@@ -315,16 +307,16 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.val_slider_amplitude = self.slider_amplitude.value()
 
         self.layout_lateral.addSpacing(10)
-        # Slider escala X (escala de tempo, ms/div)
+        # Slider escala X (multiplo/divisao do intervalo real do frame)
         self.texto_slider = QtWidgets.QLabel("Slider da Escala")
         self.texto_slider.setStyleSheet(self.estiloTextoEscala)
         self.layout_lateral.addWidget(self.texto_slider)
 
         self.slider_escala = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider_escala.setMinimum(0)      
-        self.slider_escala.setMaximum(len(self.escalas_freq)-1)    
+        self.slider_escala.setMinimum(0)
+        self.slider_escala.setMaximum(len(self.escalas_freq)-1)
         self.slider_escala.setSingleStep(1)
-        self.slider_escala.setValue(4)
+        self.slider_escala.setValue(1)   # idx 1 = fator 1.0 (frame inteiro)
         self.slider_escala.setStyleSheet(self.estiloSlider)
 
         self.layout_lateral.addWidget(self.slider_escala)
@@ -384,9 +376,13 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.grafico.showGrid(x=True, y=True)  # Mostrar grid no grafico
         self.grafico.enableAutoRange(axis='y', enable=False)  # impede o pyqtgraph de reescalar o Y sozinho
         self.grafico.enableAutoRange(axis='x', enable=False)  # idem no X
+        # forca o eixo X a mostrar os rotulos mesmo quando ficam proximos
+        eixo_x = self.grafico.getAxis('bottom')
+        eixo_x.setStyle(textFillLimits=[(0, 1.0)])
+        eixo_x.setHeight(35)   # da espaco vertical pros numeros nao serem cortados
 
     def Resetar_clicado(self):
-        self.slider_escala.setValue(4)     
+        self.slider_escala.setValue(1)   # idx 1 = fator 1.0 (frame inteiro)
         self.slider_amplitude.setValue(4)    
         self.slider_offset.setValue(0)
         self.frame = []
@@ -415,17 +411,19 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.texto_amplitude.setText(f"Amplitude: topo {y_topo-0.1:.1f} V")
 
     def atualizar_grafico(self):
-        # --- Eixo X (escala de tempo em ms/div) ---
-        self.idx_freq= self.slider_escala.value()         # valor do slider = ms/div
-        largura_ms = self.escalas_freq[self.idx_freq]            # janela total = n_div * (ms/div)
+        # --- Eixo X (escala de tempo) ---
+        self.idx_freq = self.slider_escala.value()      # indice na lista de fatores
+        fator = self.escalas_freq[self.idx_freq]         # multiplo do intervalo real
+        largura_ms = self.dur_real_ms * fator            # janela = duracao real * fator
 
         self.grafico.setXRange(0, largura_ms, padding=0)
 
-        # trava o grid: 1 linha por divisao, cada uma valendo ms_por_div
+        # grid: n_div linhas dividindo a janela exibida
         eixo_x = self.grafico.getAxis('bottom')
-        ticks = [(d * self.ms_por_div, str(d * self.ms_por_div)) for d in range(self.n_div + 1)]
+        ms_por_div_real = largura_ms / self.n_div
+        ticks = [(d * ms_por_div_real, f"{d * ms_por_div_real:.3f}") for d in range(self.n_div + 1)]
         eixo_x.setTicks([ticks])
-        self.texto_slider.setText(f"Escala: {largura_ms} ms/div")
+        self.texto_slider.setText(f"Janela: {largura_ms:.3f} ms (x{fator})")
 
         # --- Eixo Y (amplitude) ---
         self.atualizar_eixo_y()
@@ -446,7 +444,8 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         """So le/parseia a serial e monta o frame. Nao mexe no grafico.
 
         Protocolo do firmware (enviarFrameSerial):
-            _Update            <- marcador de INICIO de frame
+            _Update:<tempo_s>  <- marcador de INICIO de frame; opcionalmente traz
+                                  o tempo real de coleta do frame (em segundos)
             <amostra 0>        <- 256 linhas, um inteiro 0..4095 por linha
             ...
             <amostra 255>
@@ -462,9 +461,19 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         for linha in partes:
             linha = linha.strip()       # tira o \r do \r\n
 
-            # '_Update' agora marca o INICIO de um frame novo:
+            # '_Update' marca o INICIO de um frame novo:
             # descarta qualquer resto parcial e libera a acumulacao.
+            # Se vier '_Update:<tempo_s>', recalcula dt_ms e a duracao real do frame.
             if '_Update' in linha:
+                partes_marcador = linha.split(':')
+                if len(partes_marcador) == 2:
+                    try:
+                        tempo_coleta_s = float(partes_marcador[1])
+                        self.dt_ms = (tempo_coleta_s*100 ) / self.N
+                        self.dur_real_ms = self.N * self.dt_ms   # duracao real do frame
+                        self.atualizar_grafico()                 # reaplica escala X com o novo intervalo
+                    except ValueError:
+                        pass   # marcador corrompido: mantem dt_ms anterior
                 self.frame = []
                 self.sincronizado = True
                 continue
