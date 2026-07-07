@@ -372,7 +372,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     def configurar_grafico(self):
         self.grafico.setLabel('left', 'Amplitude', units='V')  # eixo y do grafico
-        self.grafico.setLabel('bottom', 'Tempo', units='µs')   # eixo x do grafico
+        self.grafico.setLabel('bottom', 'Tempo', units='ms')   # eixo x do grafico
         self.grafico.showGrid(x=True, y=True)  # Mostrar grid no grafico
         self.grafico.enableAutoRange(axis='y', enable=False)  # impede o pyqtgraph de reescalar o Y sozinho
         self.grafico.enableAutoRange(axis='x', enable=False)  # idem no X
