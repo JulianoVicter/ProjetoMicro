@@ -6,14 +6,22 @@ import serial
 
 
 print("PyQtGraph Version: ", pg.__version__)
-print(">>> RODANDO janela_Graf_esp32.py (conversao ADC->tensao 0..3.3 V ATIVA) <<<")
+print(">>> RODANDO janela_Graf_esp32.py (conversao ADC->sinal real -5..+5 V ATIVA) <<<")
 
 # ---- Calibracao do ADC (ESP32, 12 bits) ----
 V_REF = 3.3
-ADC_MAX = 4095
+ADC_MAX = 3475
+ADC_MIN = 750 
+
+V_MIN_REAL = -10.0
+V_MAX_REAL = 10.0
+V_POR_CODIGO = (V_MAX_REAL - V_MIN_REAL) / (ADC_MAX - ADC_MIN)   # agora usa a faixa toda (20V), nao so 10V
 
 
-val_offset_global = 0
+
+
+global val_offset_global
+val_offset_global = 0.0 
 
 def calcula_media(val):
     return sum(val) / len(val)
@@ -230,10 +238,6 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.painel_horizontal.setLayout(self.layout_horizontal)
 
         # ================= BASE DE TEMPO (eixo X) =================
-        # fs = taxa de amostragem inicial do ADC no firmware (Hz). dt_ms e derivado dela
-        # e passa a ser ATUALIZADO a cada frame quando o firmware envia o tempo de
-        # coleta junto do marcador ('_Update:<tempo_s>'). E o que mantem o eixo X
-        # sincronizado com o sinal real.
         self.fs = 20000.0                  # Hz  (taxa inicial do firmware)
         self.dt_ms = 1000.0 / self.fs      # ms entre amostras (recalculado por frame)
         self.n_div = 10                    # numero de divisoes horizontais visiveis
@@ -250,27 +254,13 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
         # escalas como MULTIPLOS/DIVISOES do intervalo real do frame.
         # 1.0 = frame inteiro; <1 = zoom in (menos tempo); >1 = zoom out.
-        self.escalas_freq = [2.0, 1.0, 0.5, 0.25, 0.125]
+        self.escalas_freq = [8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125]
+
         self.idx_freq = 1   # comeca em 1.0 = frame inteiro
 
         # ================= AMPLITUDE (eixo Y) =================
-        # Exibicao em steps: a base fica ANCORADA no 0 e o TOPO desce em steps.
-        # Topo menor -> a mesma onda ocupa mais altura da tela -> "estica pra cima".
-        # Isso NAO toca nos dados plotados, so muda a janela de visualizacao (setYRange).
-        self.y_min = 0.0                            # base ancorada no zero (nao muda)
-        step = 0.5
-        self.escalas_topo = [
-            V_REF + 4*step + 0.1,
-            V_REF + 3*step + 0.1,
-            V_REF + 2*step + 0.1,
-            V_REF + 1*step + 0.1,
-            V_REF + 0.1,
-            V_REF - 1*step + 0.1,
-            V_REF - 2*step + 0.1,
-            V_REF - 3*step + 0.1,
-            V_REF - 4*step + 0.1,
-        ]  # topo do eixo Y (V); simetrico em torno de V_REF, +0.1 so visual, menor = mais esticado
-        self.idx_amplitude = 0                      # comeca no topo 3.3 V (onda no fundo)
+        self.escalas_amp = [40.0, 20.0, 10.0, 5.0, 3.0, 2.0, 1.0, 0.5, 0.25, 0.1]# semi-amplitude visivel (V)
+        self.idx_amplitude = 1   # comeca em 5.0 -> mostra o sinal inteiro (-5..+5 V)
 
         # Curva criada uma vez. Depois so atualizamos com setData.
         self.curva = self.grafico.plot([], [], pen=self.corGrafico)
@@ -297,9 +287,9 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
         self.slider_amplitude = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.slider_amplitude.setMinimum(0)                               # indice na lista
-        self.slider_amplitude.setMaximum(len(self.escalas_topo) - 1)      # ultimo indice
+        self.slider_amplitude.setMaximum(len(self.escalas_amp) - 1)       # ultimo indice
         self.slider_amplitude.setSingleStep(1)
-        self.slider_amplitude.setValue(4)
+        self.slider_amplitude.setValue(2)   # idx 1 = +/-5 V (sinal inteiro visivel)
         self.slider_amplitude.setStyleSheet(self.estiloSliderAmplitude)
 
         self.layout_lateral.addWidget(self.slider_amplitude)
@@ -316,7 +306,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.slider_escala.setMinimum(0)
         self.slider_escala.setMaximum(len(self.escalas_freq)-1)
         self.slider_escala.setSingleStep(1)
-        self.slider_escala.setValue(1)   # idx 1 = fator 1.0 (frame inteiro)
+        self.slider_escala.setValue(4)   # idx 1 = fator 1.0 (frame inteiro)
         self.slider_escala.setStyleSheet(self.estiloSlider)
 
         self.layout_lateral.addWidget(self.slider_escala)
@@ -383,7 +373,7 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     def Resetar_clicado(self):
         self.slider_escala.setValue(1)   # idx 1 = fator 1.0 (frame inteiro)
-        self.slider_amplitude.setValue(4)    
+        self.slider_amplitude.setValue(1)    # idx 1 = +/-5 V (sinal inteiro)
         self.slider_offset.setValue(0)
         self.frame = []
         self.sincronizado = False            # espera o proximo '_Update' pra recomecar
@@ -398,17 +388,16 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
             self.curva.setPen(self.corGrafico)   # so troca a caneta, sem replotar
 
     def atualizar_eixo_y(self):
-        # Escala vertical em steps. So mexe na EXIBICAO (setYRange), nunca nos dados.
-        # base ancorada no 0; topo desce conforme o slider sobe -> onda estica pra cima.
+        # Vista SIMETRICA em torno de 0 (sinal bipolar -5..+5 V).
+        # So mexe na EXIBICAO (setYRange), nunca nos dados.
+        # amp menor -> a mesma onda ocupa mais tela -> "estica".
         self.idx_amplitude = self.slider_amplitude.value()
-        y_topo = self.escalas_topo[self.idx_amplitude]
+        amp = self.escalas_amp[self.idx_amplitude]
 
-        desloc =0  #y_topo
-
-        self.grafico.setYRange(self.y_min + desloc, y_topo + desloc, padding=0)
+        self.grafico.setYRange(-amp, amp, padding=0)
 
         # feedback do valor atual no proprio rotulo do slider
-        self.texto_amplitude.setText(f"Amplitude: topo {y_topo-0.1:.1f} V")
+        self.texto_amplitude.setText(f"Amplitude: +/-{amp:.1f} V")
 
     def atualizar_grafico(self):
         # --- Eixo X (escala de tempo) ---
@@ -441,16 +430,6 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
         self.texto_offset.setText(f"Offset: {val_offset_global}")
 
     def receber_serial(self):
-        """So le/parseia a serial e monta o frame. Nao mexe no grafico.
-
-        Protocolo do firmware (enviarFrameSerial):
-            _Update:<tempo_s>  <- marcador de INICIO de frame; opcionalmente traz
-                                  o tempo real de coleta do frame (em segundos)
-            <amostra 0>        <- 256 linhas, um inteiro 0..4095 por linha
-            ...
-            <amostra 255>
-        Linhas de boot/erro do ESP32 (nao numericas) sao ignoradas.
-        """
         n = self.porta.in_waiting
         if n:
             self._buf += self.porta.read(n).decode('ascii', errors='ignore')
@@ -495,16 +474,15 @@ class JanelaOciloscopio(QtWidgets.QMainWindow):
 
     def plotar_frame(self, frame):
         """Recebe um frame pronto (N amostras) e atualiza curva + media."""
-        y=[]
+        y = []
         for b in frame:
-            tensao = ((b / ADC_MAX) * V_REF) + val_offset_global 
+            tensao = V_MIN_REAL + (b - ADC_MIN) * V_POR_CODIGO + val_offset_global
             y.append(tensao)
-        #y = [(b / ADC_MAX) * V_REF for b in frame]  # converte ADC->tensao 0..3.3 V
         x = [i * self.dt_ms for i in range(len(frame))]
 
-        vmax= max(y) 
-        vmin= min(y)
-        vpp = vmax - vmin 
+        vmax = max(y)
+        vmin = min(y)
+        vpp = vmax - vmin
         self.vpp_graf.setText(f"Pico a pico: {vpp:.2f} V")
         self.curva.setData(x, y)
         self.media = calcula_media(y)
